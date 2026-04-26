@@ -2,10 +2,12 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram import BotCommand
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
 
 from bot.database import Database
 from bot.handlers import (
+    button_callback,
     checkin_handler,
     create_handler,
     delete_handler,
@@ -26,11 +28,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+BOT_COMMANDS = [
+    BotCommand("create", "Create a new tracker"),
+    BotCommand("join", "Join a tracker"),
+    BotCommand("leave", "Leave a tracker"),
+    BotCommand("checkin", "Check in for a tracker"),
+    BotCommand("next", "Who should check in next?"),
+    BotCommand("history", "Check-in history (last 2 months)"),
+    BotCommand("trackers", "List trackers in this chat"),
+    BotCommand("participants", "List participants in a tracker"),
+    BotCommand("delete", "Delete a tracker"),
+]
+
+
 async def post_init(application):
     db = Database(os.getenv("DATABASE_PATH", "checkin_bot.db"))
     await db.connect()
     application.bot_data["db"] = db
-    logger.info("Database connected")
+    await application.bot.set_my_commands(BOT_COMMANDS)
+    logger.info("Database connected, commands registered")
 
 
 async def post_shutdown(application):
@@ -62,6 +78,7 @@ def main():
     app.add_handler(CommandHandler("trackers", trackers_handler))
     app.add_handler(CommandHandler("participants", participants_handler))
     app.add_handler(CommandHandler("delete", delete_handler))
+    app.add_handler(CallbackQueryHandler(button_callback))
 
     logger.info("Bot starting...")
     app.run_polling()
