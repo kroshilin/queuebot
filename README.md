@@ -1,6 +1,6 @@
 # Who is next? — Telegram Check-in Bot
 
-A Telegram bot that tracks check-ins in group chats using round-robin rotation. Create trackers for recurring activities (standup, coffee runs, etc.), and the bot tells you who's next.
+A Telegram bot that tracks check-ins in group chats using round-robin rotation. Each chat gets one tracker — no arguments needed on any command.
 
 ## Setup
 
@@ -30,24 +30,25 @@ python -m bot.main
 
 | Command | Description |
 |---------|-------------|
-| `/create <name>` | Create a new tracker |
-| `/join <name>` | Join a tracker as a participant |
-| `/leave <name>` | Leave a tracker |
-| `/checkin <name>` | Record your check-in |
-| `/next <name>` | See who should check in next |
-| `/history <name>` | View check-in history (last 2 months) |
-| `/trackers` | List all trackers in the chat |
-| `/participants <name>` | List participants in a tracker |
-| `/delete <name>` | Delete a tracker (creator only) |
+| `/create` | Create the tracker for this chat |
+| `/join` | Join as a participant |
+| `/leave` | Leave the tracker |
+| `/checkin` | Check in |
+| `/next` | Who's next? |
+| `/history` | Check-in history (last 2 months) |
+| `/participants` | List participants |
+| `/delete` | Delete the tracker (creator only) |
+
+All commands also appear in Telegram's `/` autocomplete menu. Key responses include inline buttons so you can tap instead of typing.
 
 ## How it works
 
 - Add the bot to a group chat
-- Create a tracker (e.g., `/create standup`)
-- Participants join with `/join standup`
-- When it's your turn, check in with `/checkin standup`
+- Create the tracker with `/create`
+- Participants join with `/join`
+- When it's your turn, check in with `/checkin`
 - The bot announces who's next in round-robin order
-- Ask `/next standup` anytime to see who should go
+- Tap the **Check in** or **Who's next?** buttons, or type `/next`
 
 ## Running tests
 

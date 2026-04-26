@@ -16,7 +16,6 @@ from bot.handlers import (
     leave_handler,
     next_handler,
     participants_handler,
-    trackers_handler,
 )
 
 load_dotenv()
@@ -29,15 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 BOT_COMMANDS = [
-    BotCommand("create", "Create a new tracker"),
-    BotCommand("join", "Join a tracker"),
-    BotCommand("leave", "Leave a tracker"),
-    BotCommand("checkin", "Check in for a tracker"),
-    BotCommand("next", "Who should check in next?"),
+    BotCommand("create", "Create the tracker for this chat"),
+    BotCommand("join", "Join as a participant"),
+    BotCommand("leave", "Leave the tracker"),
+    BotCommand("checkin", "Check in"),
+    BotCommand("next", "Who's next?"),
     BotCommand("history", "Check-in history (last 2 months)"),
-    BotCommand("trackers", "List trackers in this chat"),
-    BotCommand("participants", "List participants in a tracker"),
-    BotCommand("delete", "Delete a tracker"),
+    BotCommand("participants", "List participants"),
+    BotCommand("delete", "Delete the tracker"),
 ]
 
 
@@ -75,7 +73,6 @@ def main():
     app.add_handler(CommandHandler("checkin", checkin_handler))
     app.add_handler(CommandHandler("next", next_handler))
     app.add_handler(CommandHandler("history", history_handler))
-    app.add_handler(CommandHandler("trackers", trackers_handler))
     app.add_handler(CommandHandler("participants", participants_handler))
     app.add_handler(CommandHandler("delete", delete_handler))
     app.add_handler(CallbackQueryHandler(button_callback))

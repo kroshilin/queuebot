@@ -4,15 +4,19 @@ from telegram.ext import ContextTypes
 from bot.database import Database
 from bot.round_robin import get_next_participant
 
+NO_TRACKER_MSG = "No tracker in this chat yet. Create one with /create"
+
+ACTION_BUTTONS = InlineKeyboardMarkup([
+    [
+        InlineKeyboardButton("Check in", callback_data="checkin"),
+        InlineKeyboardButton("Who's next?", callback_data="next"),
+        InlineKeyboardButton("History", callback_data="history"),
+    ]
+])
+
 
 def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
     return context.bot_data["db"]
-
-
-def _get_tracker_name(context: ContextTypes.DEFAULT_TYPE) -> str | None:
-    if context.args:
-        return " ".join(context.args).strip().lower()
-    return None
 
 
 def _display_name(user) -> str:
@@ -21,208 +25,133 @@ def _display_name(user) -> str:
     return user.first_name or user.username or str(user.id)
 
 
-def _tracker_buttons(name: str, include_checkin: bool = True) -> InlineKeyboardMarkup:
-    """Build inline keyboard with common tracker actions."""
-    buttons = []
-    if include_checkin:
-        buttons.append(InlineKeyboardButton("Check in", callback_data=f"checkin:{name}"))
-    buttons.append(InlineKeyboardButton("Who's next?", callback_data=f"next:{name}"))
-    buttons.append(InlineKeyboardButton("History", callback_data=f"history:{name}"))
-    return InlineKeyboardMarkup([buttons])
+async def _require_tracker(db: Database, chat_id: int, reply_fn) -> dict | None:
+    tracker = await db.get_tracker(chat_id)
+    if not tracker:
+        await reply_fn(NO_TRACKER_MSG)
+    return tracker
 
 
 async def create_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /create <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker_id = await db.create_tracker(
-        update.effective_chat.id, name, update.effective_user.id
-    )
+    tracker_id = await db.create_tracker(update.effective_chat.id, update.effective_user.id)
     if tracker_id is None:
-        await update.message.reply_text(f'Tracker "{name}" already exists in this chat.')
+        await update.message.reply_text("A tracker already exists in this chat.")
         return
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Join this tracker", callback_data=f"join:{name}")]
+        [InlineKeyboardButton("Join", callback_data="join")]
     ])
     await update.message.reply_text(
-        f'Tracker "{name}" created! Participants can join with /join {name}',
+        "Tracker created! Participants can join with /join",
         reply_markup=keyboard,
     )
 
 
 async def join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /join <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     user = update.effective_user
     added = await db.add_participant(tracker["id"], user.id, _display_name(user))
     if not added:
-        await update.message.reply_text(f"You're already in \"{name}\".")
+        await update.message.reply_text("You've already joined.")
         return
 
     await update.message.reply_text(
-        f"{_display_name(user)} joined \"{name}\"!",
-        reply_markup=_tracker_buttons(name),
+        f"{_display_name(user)} joined!",
+        reply_markup=ACTION_BUTTONS,
     )
 
 
 async def leave_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /leave <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     removed = await db.remove_participant(tracker["id"], update.effective_user.id)
     if not removed:
-        await update.message.reply_text(f"You're not in \"{name}\".")
+        await update.message.reply_text("You're not a participant.")
         return
 
-    await update.message.reply_text(
-        f"{_display_name(update.effective_user)} left \"{name}\"."
-    )
+    await update.message.reply_text(f"{_display_name(update.effective_user)} left.")
 
 
 async def checkin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /checkin <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     user = update.effective_user
     participants = await db.get_participants(tracker["id"])
     if not any(p["user_id"] == user.id for p in participants):
-        await update.message.reply_text(
-            f"You're not a participant in \"{name}\". Join first with /join {name}"
-        )
+        await update.message.reply_text("You're not a participant. Join first with /join")
         return
 
     await db.record_checkin(tracker["id"], user.id)
 
     next_p = await get_next_participant(db, tracker["id"])
-    reply = f"{_display_name(user)} checked in for \"{name}\"!"
+    reply = f"{_display_name(user)} checked in!"
     if next_p:
         reply += f"\nNext up: {next_p['display_name']}"
 
-    await update.message.reply_text(
-        reply,
-        reply_markup=_tracker_buttons(name),
-    )
+    await update.message.reply_text(reply, reply_markup=ACTION_BUTTONS)
 
 
 async def next_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /next <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     next_p = await get_next_participant(db, tracker["id"])
     if not next_p:
-        await update.message.reply_text(f'No participants in "{name}" yet.')
+        await update.message.reply_text("No participants yet. Join with /join")
         return
 
     await update.message.reply_text(
-        f'Who is next for "{name}"? {next_p["display_name"]}!',
-        reply_markup=_tracker_buttons(name),
+        f"Who is next? {next_p['display_name']}!",
+        reply_markup=ACTION_BUTTONS,
     )
 
 
 async def history_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /history <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     history = await db.get_checkin_history(tracker["id"])
     if not history:
-        await update.message.reply_text(f'No check-ins for "{name}" in the last 2 months.')
+        await update.message.reply_text("No check-ins in the last 2 months.")
         return
 
-    lines = [f'Check-in history for "{name}" (last 2 months):\n']
-    for entry in history[:50]:  # Cap at 50 to avoid message size limits
+    lines = ["Check-in history (last 2 months):\n"]
+    for entry in history[:50]:
         lines.append(f"  {entry['checked_in_at']} — {entry['display_name']}")
 
     if len(history) > 50:
         lines.append(f"\n...and {len(history) - 50} more")
 
-    await update.message.reply_text("\n".join(lines))
-
-
-async def trackers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db = _get_db(context)
-    trackers = await db.list_trackers(update.effective_chat.id)
-    if not trackers:
-        await update.message.reply_text("No trackers in this chat. Create one with /create <name>")
-        return
-
-    lines = ["Trackers in this chat:\n"]
-    buttons = []
-    for t in trackers:
-        lines.append(f"  • {t['name']}")
-        buttons.append([
-            InlineKeyboardButton(f"Check in: {t['name']}", callback_data=f"checkin:{t['name']}"),
-            InlineKeyboardButton(f"Next: {t['name']}", callback_data=f"next:{t['name']}"),
-        ])
-
-    await update.message.reply_text(
-        "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
-    )
+    await update.message.reply_text("\n".join(lines), reply_markup=ACTION_BUTTONS)
 
 
 async def participants_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /participants <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     participants = await db.get_participants(tracker["id"])
     if not participants:
-        await update.message.reply_text(f'No participants in "{name}" yet. Join with /join {name}')
+        await update.message.reply_text("No participants yet. Join with /join")
         return
 
-    lines = [f'Participants in "{name}":\n']
+    lines = ["Participants:\n"]
     for i, p in enumerate(participants, 1):
         lines.append(f"  {i}. {p['display_name']}")
 
@@ -230,15 +159,9 @@ async def participants_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = _get_tracker_name(context)
-    if not name:
-        await update.message.reply_text("Usage: /delete <tracker_name>")
-        return
-
     db = _get_db(context)
-    tracker = await db.get_tracker(update.effective_chat.id, name)
+    tracker = await _require_tracker(db, update.effective_chat.id, update.message.reply_text)
     if not tracker:
-        await update.message.reply_text(f'Tracker "{name}" not found.')
         return
 
     if tracker["created_by_user_id"] != update.effective_user.id:
@@ -246,7 +169,7 @@ async def delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await db.delete_tracker(tracker["id"])
-    await update.message.reply_text(f'Tracker "{name}" deleted.')
+    await update.message.reply_text("Tracker deleted.")
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -254,28 +177,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    data = query.data
-    if ":" not in data:
-        return
-
-    action, name = data.split(":", 1)
+    action = query.data
     db = _get_db(context)
     chat_id = query.message.chat_id
-    tracker = await db.get_tracker(chat_id, name)
+    tracker = await db.get_tracker(chat_id)
 
     if not tracker:
-        await query.message.reply_text(f'Tracker "{name}" not found.')
+        await query.message.reply_text(NO_TRACKER_MSG)
         return
 
     if action == "join":
         user = query.from_user
         added = await db.add_participant(tracker["id"], user.id, _display_name(user))
         if not added:
-            await query.message.reply_text(f"{_display_name(user)} is already in \"{name}\".")
+            await query.message.reply_text(f"{_display_name(user)} has already joined.")
         else:
             await query.message.reply_text(
-                f"{_display_name(user)} joined \"{name}\"!",
-                reply_markup=_tracker_buttons(name),
+                f"{_display_name(user)} joined!",
+                reply_markup=ACTION_BUTTONS,
             )
 
     elif action == "checkin":
@@ -283,37 +202,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         participants = await db.get_participants(tracker["id"])
         if not any(p["user_id"] == user.id for p in participants):
             await query.message.reply_text(
-                f"{_display_name(user)} is not in \"{name}\". Join first with /join {name}"
+                f"{_display_name(user)} is not a participant. Join first with /join"
             )
             return
         await db.record_checkin(tracker["id"], user.id)
         next_p = await get_next_participant(db, tracker["id"])
-        reply = f"{_display_name(user)} checked in for \"{name}\"!"
+        reply = f"{_display_name(user)} checked in!"
         if next_p:
             reply += f"\nNext up: {next_p['display_name']}"
-        await query.message.reply_text(reply, reply_markup=_tracker_buttons(name))
+        await query.message.reply_text(reply, reply_markup=ACTION_BUTTONS)
 
     elif action == "next":
         next_p = await get_next_participant(db, tracker["id"])
         if not next_p:
-            await query.message.reply_text(f'No participants in "{name}" yet.')
+            await query.message.reply_text("No participants yet.")
         else:
             await query.message.reply_text(
-                f'Who is next for "{name}"? {next_p["display_name"]}!',
-                reply_markup=_tracker_buttons(name),
+                f"Who is next? {next_p['display_name']}!",
+                reply_markup=ACTION_BUTTONS,
             )
 
     elif action == "history":
         history = await db.get_checkin_history(tracker["id"])
         if not history:
-            await query.message.reply_text(f'No check-ins for "{name}" in the last 2 months.')
+            await query.message.reply_text("No check-ins in the last 2 months.")
         else:
-            lines = [f'Check-in history for "{name}" (last 2 months):\n']
+            lines = ["Check-in history (last 2 months):\n"]
             for entry in history[:50]:
                 lines.append(f"  {entry['checked_in_at']} — {entry['display_name']}")
             if len(history) > 50:
                 lines.append(f"\n...and {len(history) - 50} more")
             await query.message.reply_text(
                 "\n".join(lines),
-                reply_markup=_tracker_buttons(name),
+                reply_markup=ACTION_BUTTONS,
             )

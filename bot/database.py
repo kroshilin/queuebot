@@ -51,32 +51,25 @@ class Database:
 
     # --- Trackers ---
 
-    async def create_tracker(self, chat_id: int, name: str, user_id: int) -> int | None:
-        """Create a tracker. Returns tracker id, or None if name already taken."""
+    async def create_tracker(self, chat_id: int, user_id: int) -> int | None:
+        """Create the tracker for a chat. Returns tracker id, or None if one already exists."""
         try:
             cursor = await self._db.execute(
-                "INSERT INTO trackers (chat_id, name, created_by_user_id) VALUES (?, ?, ?)",
-                (chat_id, name.lower(), user_id),
+                "INSERT INTO trackers (chat_id, name, created_by_user_id) VALUES (?, 'default', ?)",
+                (chat_id, user_id),
             )
             await self._db.commit()
             return cursor.lastrowid
         except aiosqlite.IntegrityError:
             return None
 
-    async def get_tracker(self, chat_id: int, name: str) -> dict | None:
+    async def get_tracker(self, chat_id: int) -> dict | None:
         cursor = await self._db.execute(
-            "SELECT * FROM trackers WHERE chat_id = ? AND name = ?",
-            (chat_id, name.lower()),
+            "SELECT * FROM trackers WHERE chat_id = ?",
+            (chat_id,),
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
-
-    async def list_trackers(self, chat_id: int) -> list[dict]:
-        cursor = await self._db.execute(
-            "SELECT * FROM trackers WHERE chat_id = ? ORDER BY created_at",
-            (chat_id,),
-        )
-        return [dict(row) for row in await cursor.fetchall()]
 
     async def delete_tracker(self, tracker_id: int) -> None:
         await self._db.execute("DELETE FROM trackers WHERE id = ?", (tracker_id,))
