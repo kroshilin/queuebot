@@ -130,6 +130,14 @@ class Database:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def get_last_checkin_per_participant(self, tracker_id: int) -> dict[int, int]:
+        """Return {user_id: max_checkin_id} for each participant who has checked in."""
+        cursor = await self._db.execute(
+            "SELECT user_id, MAX(id) AS last_checkin_id FROM checkins WHERE tracker_id = ? GROUP BY user_id",
+            (tracker_id,),
+        )
+        return {row["user_id"]: row["last_checkin_id"] for row in await cursor.fetchall()}
+
     async def get_checkin_history(self, tracker_id: int, days: int = 60) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = await self._db.execute(

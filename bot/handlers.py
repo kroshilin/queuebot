@@ -2,7 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.database import Database
-from bot.round_robin import get_next_participant
+from bot.round_robin import get_next_participant, predict_queue
 
 NO_TRACKER_MSG = "No tracker in this chat yet. Create one with /create"
 
@@ -108,13 +108,14 @@ async def next_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not tracker:
         return
 
-    next_p = await get_next_participant(db, tracker["id"])
-    if not next_p:
+    queue = await predict_queue(db, tracker["id"], turns=3)
+    if not queue:
         await update.message.reply_text("No participants yet. Join with /join")
         return
 
+    lines = [f"{i}. {p['display_name']}" for i, p in enumerate(queue, 1)]
     await update.message.reply_text(
-        f"Who is next? {next_p['display_name']}!",
+        "Who is next?\n" + "\n".join(lines),
         reply_markup=ACTION_BUTTONS,
     )
 
@@ -213,12 +214,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(reply, reply_markup=ACTION_BUTTONS)
 
     elif action == "next":
-        next_p = await get_next_participant(db, tracker["id"])
-        if not next_p:
+        queue = await predict_queue(db, tracker["id"], turns=3)
+        if not queue:
             await query.message.reply_text("No participants yet.")
         else:
+            lines = [f"{i}. {p['display_name']}" for i, p in enumerate(queue, 1)]
             await query.message.reply_text(
-                f"Who is next? {next_p['display_name']}!",
+                "Who is next?\n" + "\n".join(lines),
                 reply_markup=ACTION_BUTTONS,
             )
 
